@@ -9,11 +9,20 @@
 # (lon_ID, lat_ID)
 #
 # extract all climate info for each climate ID for which there are bird data
-# and discard rest. Check these patterns make sense (do this for temp for which
-# there is more obvious expectation) & save
+# and discard rest. Check that spatial and temporal patterns make sense (do this 
+# for temp for which there is more obvious expectation) & save
+#
+# 5 sense checks: 
+#   (1) does extracted climate have the correct spatial configuration (i.e. 
+#   correspond to Europe outline)
+#   (2) does the LAEA projection look sensible?
+#   (3) does LAEA projection for bird sites look sensible?
+#   (4) do site and climate cell coordinates show 1:1 correspondence?
+#   (5) do spatial & temporal patterns in temperature data correspond to 
+#   expectation? (by extension this applies to rainfall data, as extraction process
+#   is identical)
 
 ## Housekeeping ----
-# rm(list=ls()); graphics.off()
 library(ncdf4); library(dplyr); library(ggplot2); library(sp); library(lubridate)
 CRS_WGS84 <- "+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"
 CRS_LAEA <- "+proj=laea +lat_0=90 +lon_0=10 +ellps=WGS84 +datum=WGS84 +units=m"
@@ -21,8 +30,8 @@ CRS_LAEA <- "+proj=laea +lat_0=90 +lon_0=10 +ellps=WGS84 +datum=WGS84 +units=m"
 # Read in NetCDF files 
 ## Create key for climate array ----
 # overall dimensions of these are the same, just contain different climate info 
-ncdf_rain <- nc_open("files/data-raw/climate-netCDF/rr_0.22deg_rot_v12.0.nc") 
-ncdf_temp <- nc_open("files/data-raw/climate-netCDF/tg_0.22deg_rot_v12.0.nc")
+ncdf_rain <- nc_open("files/climate-netCDF/rr_0.22deg_rot_v12.0.nc") 
+ncdf_temp <- nc_open("files/climate-netCDF/tg_0.22deg_rot_v12.0.nc")
 
 # get lats and lons and assign a climate ID
 lat <- ncvar_get(ncdf_rain,"Actual_latitude")
@@ -32,8 +41,8 @@ climateKey <- data_frame(lat_WGS84 = c(lat), lon_WGS84=c(lon)) %>%
 
 ## The explicit approach to getting array indices for each climate ID (using which()
 ## to find the lats and lons that correspond to a particular array index) is slow, 
-## so replaced with code that just replicates the logic. 
-## Can confirm correctness of result using the identical(). 
+## so replaced with code that does the same thing directly
+## Can confirm sameness of result using the identical(). 
 # climID <- climateKey %>% 
 #     group_by(climateID) %>%
 #     mutate(rowID = which(lat==lat_WGS84 & lon == lon_WGS84, arr.ind = T)[1],
@@ -43,7 +52,6 @@ climateKey <- data_frame(lat_WGS84 = c(lat), lon_WGS84=c(lon)) %>%
 #     mutate(rowID = rep(1:272, 214),
 #            colID = rep(1:214, each=272))
 # identical(ungroup(climID), ungroup(climIDtest)) # ==TRUE
-
 climID <- climateKey %>%
     mutate(lon_ID = rep(1:272, 214),
            lat_ID = rep(1:214, each=272))
@@ -57,8 +65,7 @@ hasClim <- apply(rain, c(1, 2), function(x) sum(!is.na(x)))
 climateCheck <- climID %>% ungroup %>%
     mutate(hasClim = c(hasClim))
 
-p1 <- ggplot(climateCheck, aes(lon_WGS84, lat_WGS84, col=hasClim)) + geom_point() +
-    labs(caption = bquote(bold("Sense check:") ~ "extracted lats and lons with climate data correspond to Europe outline"))
+p1 <- ggplot(climateCheck, aes(lon_WGS84, lat_WGS84, col=hasClim)) + geom_point() 
 p2 <- ggplot(climateCheck, aes(lon_ID, lat_ID, fill=hasClim)) + geom_tile() +
     labs(caption = bquote(bold("Sense check:") ~ "extracted lats and lons with climate data correspond to Europe outline"))
 pBoth <- egg::ggarrange(p1,p2)
@@ -246,7 +253,7 @@ ggsave("figures/check extracted climate/temporal_annualTemp.png", height=150, wi
 
 ## Save outputs ----
 # save climate key (that relates siteID to climate ID), and climate datasets 
-saveRDS(fullClimateDF, "files/fullClimateDF.rds")
+saveRDS(fullClimateDF, "files/ClimateDF_full.rds")
 
 # get monthly summaries (note: slow)
 summClimateDF <- fullClimateDF_check %>% 
@@ -256,10 +263,9 @@ summClimateDF <- fullClimateDF_check %>%
 # remove cells with no data
 summClimateDF %>%
     filter(!is.nan(temp_monthlyMean)) %>%
-saveRDS(., "files/monthlySummaryClimateDF.rds")
+saveRDS(., "files/climateDF_monthlySummary.rds")
 
-# climateKey
-
+# save climateKey
 full %>%
     select(schemeID, siteID, climateID, 
            climLat_WGS84 = lat_WGS84_climateCell, 
