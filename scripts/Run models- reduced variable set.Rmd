@@ -19,8 +19,11 @@ All fairly straight-forward, save for the step to ensure that monthly weather va
 Sections in alignment step:
 
 (1) take just the first 1:4 months (filtering out the rest), and update the indexing to run 13:16
+
 (2) because these are now indexed counting from the year prior, set the year to be the year prior
+
 (3) merge back to the full ECAD dataframe- note there are now duplicate observations for months 1:4 (but duplicates have 13:16 indexing), but these 1:4 months are not used in subsequent analysis
+
 (4) the counts in the bird dataset are indexed as observation$_{year}$ (count_t) and observation$_{year-1}$ (count_pre); the merging of the ECAD df and the count df is based on the match of the year column. In order for this match to correspond with the period from year-1 to year, indexing of the ECAD df needs to be updated by +1. As an example if you had year==2003 in the ECAD df, and you did a straight merge, all the months of climate data would correspond to the period year:(year+1). By adding 1 to the index, year==2003, becomes year==2004, and the matched climate periods now correspond to (year-1):year, as they should. 
 
 ..after this the aligned ECAD datasets are converted to wide-format (ECAD_wide)
@@ -70,7 +73,7 @@ bird_gridded <- left_join(bird_all, dplyr::select(climKey, siteID, gridID_200k, 
     mutate(n_200k = n())
 
 # filter out grid-cells with fewer than 300 dp & merge in climate data from ECAD
-bird_ECAD <- filter(bird_gridded, n_200k >= 300, !species %in% sp_toRemove) %>%
+bird_ECAD <- filter(bird_gridded, n_200k >= 300) %>%
     left_join(., ECAD_wide, by=c("climateID", "year"))  
 
 # create df of species to run models for & add columns to catch sigmas
@@ -87,7 +90,7 @@ rm(bird_all, bird_gridded, ECAD_wide, climKey)
 # Running models
 Iterate across species, fitting models to whichever grid-cells have $\geq$ 300 datapoints. 
 
-First, set up the formula for the full model with 24 climatic variables (`f_full`)
+First, set up model formulas (`f_full` & `f_null`)
 ``` {r setupModels}
 # formula for full model 
 varList <- c("temp_brMin", "temp_brMax", "precip_brMin", "precip_brMax", "temp_owMin", "temp_owMax", "precip_owMin", "precip_owMax")
@@ -95,6 +98,8 @@ varList <- c("temp_brMin", "temp_brMax", "precip_brMin", "precip_brMax", "temp_o
 form_full <- paste0("rgr ~ ", paste0(varList, ":gridID_200k", collapse=" + "), 
                   "+ logCount_pre:gridID_200k + (1|siteID) + gridID_200k")
 form_null <- "rgr ~ logCount_pre:gridID_200k + (1|siteID) + gridID_200k"
+print(form_full)
+print(form_null)
 ```
 
 Run models, catching the model coefficients, spatial MSE, and residual variation terms
@@ -150,9 +155,9 @@ for(i in 1:nrow(modSumm_toRun)) {
         summarise(modImp = mean(resid_full^2)^.5/mean(resid_null^2)^.5, lat=mean(lat_WGS84), lon=mean(lon_WGS84),
                   species=unique(species))
 }
-
 ```
 
+# Save model outputs
 ```{r save files} 
 modSumm_toRun <- modSumm_toRun %>%
     mutate(var_quotient = sigma_full^2/sigma_null^2)
@@ -162,7 +167,8 @@ saveRDS(modSumm_toRun, "../files/model outputs/redModels_explanatoryCapacity.rds
 coefs_full <- bind_rows(coefs) %>%
     as_data_frame()  %>%
     mutate(type=ifelse(grepl("precip", term), "precip",
-                             ifelse(grepl("temp", term), "temp", NA)))
+                             ifelse(grepl("temp", term), "temp", NA))) %>%
+    rename(estimate = Estimate, SE = `Std. Error`, tVal = `t value`, pVal = `Pr(>|t|)`)
 saveRDS(coefs_full, "../files/model outputs/redModels_coefs.rds")
 
 spatial_full <- bind_rows(spatial_mse) %>%
