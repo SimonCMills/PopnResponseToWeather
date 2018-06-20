@@ -1,0 +1,179 @@
+---
+title: "Run Population Growth Rate models using full variable set"
+output: 
+  html_notebook: 
+    fig_height: 15
+    fig_width: 15
+---
+```{r}
+## Housekeeping
+library(dplyr); library(broom); library(lme4); library(tidyr); library(lmerTest);
+library(scales)
+```
+
+# Read in base datasets and merge 
+All fairly straight-forward, save for the step to ensure that monthly weather variables in the ECAD dataset are correctly aligned with the observations in the bird count dataset. I want monthly temperature and precipitation variables that cover the period from the first count ($N_t$) through to the second count ($N_{t+1}$). Counts are made in approximately April, and therefore the months of interest run from May in year $t$ through to April in time $t+1$. 
+
+Sections in alignment step:
+
+(1) take just the first 1:4 months (filtering out the rest), and update the indexing to run 13:16
+
+(2) because these are now indexed counting from the year prior, set the year to be the year prior
+
+(3) merge back to the full ECAD dataframe- note there are now duplicate observations for months 1:4 (but duplicates have 13:16 indexing), but these 1:4 months are not used in subsequent analysis
+
+(4) the counts in the bird dataset are indexed as observation$_{year}$ (count_t) and observation$_{year-1}$ (count_pre); the merging of the ECAD df and the count df is based on the match of the year column. In order for this match to correspond with the period from year-1 to year, indexing of the ECAD df needs to be updated by +1. As an example if you had year==2003 in the ECAD df, and you did a straight merge, all the months of climate data would correspond to the period year:(year+1). By adding 1 to the index, year==2003, becomes year==2004, and the matched climate periods now correspond to (year-1):year, as they should. 
+
+..after this the aligned ECAD datasets are converted to wide-format (ECAD_wide)
+```{r formatECAD}
+# Read in ECAD dataset & join in climate cell info from climateKey
+ECAD <- readRDS("../files/climateDF_monthlySummary.rds")
+# Add 100k and 200k analysis grid cell info to climate key (note: climate cells
+# are at 25km resolution, so this corresponds to 4 and 8 of these respectively)
+climKey <- readRDS("../files/climateKey_siteID-climateID.rds") %>%
+    mutate(gridID_200k = paste0("lon_", ceiling(lon_ID/8), ":lat_", ceiling(lat_ID/8)))
+ECAD_full <- left_join(climKey, ECAD, by=c("climateID"))
+
+# alignment step (see notebook text above)
+ECAD_aligned <- ECAD %>% 
+    ungroup %>%
+    filter(month %in% 1:4) %>%
+    mutate(month = month + 12, year = year-1) %>%
+    bind_rows(ECAD, .) %>%
+    ungroup %>%
+    mutate(year = year + 1)
+
+## make wide format
+# create wide format df
+temp_wide <- ECAD_aligned %>% 
+    ungroup %>% 
+    dplyr::select(-precip_monthlySum) %>%
+    spread(key = month, value=temp_monthlyMean, sep = "_")
+names(temp_wide) <- gsub("month", "temp", names(temp_wide))
+
+precip_wide <- ECAD_aligned %>% 
+    ungroup %>% 
+    dplyr::select(-temp_monthlyMean) %>%
+    spread(key = month, value=precip_monthlySum, sep = "_")
+names(precip_wide) <- gsub("month", "precip", names(precip_wide))
+
+ECAD_wide <- left_join(temp_wide, precip_wide, by=c("climateID", "year"))
+# clear away redundant objects to save some memory
+rm(ECAD_aligned, ECAD_full, ECAD)
+```
+
+
+```{r formatBirdData}
+bird_all <- readRDS("../files/birdDF.rds") 
+# create full data frame for analysis
+bird_gridded <- left_join(bird_all, dplyr::select(climKey, siteID, gridID_200k, lon_ID, lat_ID), by="siteID") %>%
+    group_by(species, gridID_200k) %>%
+    mutate(n_200k = n())
+
+# filter out grid-cells with fewer than 500 dp & merge in climate data from ECAD
+bird_ECAD <- filter(bird_gridded, n_200k >= 500) %>%
+    left_join(., ECAD_wide, by=c("climateID", "year"))  
+
+# create df of species to run models for & add columns to catch sigmas
+modSumm_toRun <- bird_ECAD %>%
+    group_by(species) %>%
+    summarise(n_grid=length(unique(gridID_200k)), n_obs = n(), n_scheme=length(unique(schemeID))) %>%
+    arrange(n_grid, n_obs)
+modSumm_toRun$sigma_null <- NA
+modSumm_toRun$sigma_full<- NA
+# clear away redundant objects to save some memory
+rm(bird_all, bird_gridded, ECAD_wide, climKey)
+```
+
+# Running models
+Iterate across species, fitting models to whichever grid-cells have $\geq$ 500 datapoints. 
+
+First, set up model formulas (`f_full` & `f_null`)
+```{r setupModels}
+# formula for full model 
+varList <- c("temp_5", "temp_6" , "temp_7" , "temp_8" , "temp_9" , "temp_10" , 
+             "temp_11" , "temp_12" , "temp_13" , "temp_14" , "temp_15" , "temp_16" , 
+             "precip_5" , "precip_6" , "precip_7", "precip_8" , "precip_9" , 
+             "precip_10" , "precip_11" , "precip_12" , "precip_13" , "precip_14" , 
+             "precip_15","precip_16")
+
+form_full <- paste0("rgr ~ ", paste0(varList, ":gridID_200k", collapse=" + "), 
+                 " + logCount_pre:gridID_200k + (1|siteID) + gridID_200k")
+form_null <- "rgr ~ logCount_pre:gridID_200k + (1|siteID) + gridID_200k"
+print(form_full)
+print(form_null)
+```
+
+Run models, catching the model coefficients, spatial MSE, and residual variation terms
+```{r runModels}
+# catch model coefficients
+coefs <- rep(NA, nrow(modSumm_toRun)) %>% as.list()
+spatial_mse <- rep(NA, nrow(modSumm_toRun)) %>% as.list()
+
+for(i in 1:nrow(modSumm_toRun)) {
+    sp_i <- modSumm_toRun$species[i]
+    print(paste0(i, ":", sp_i))
+    df_i <- bird_ECAD %>% filter(species == sp_i)
+
+    # scale for numerical stability
+    scaledVars <- df_i %>% ungroup %>%
+        dplyr::select(temp_1:precip_16, logCount_pre) %>%
+        scale(., center = T, scale = T)
+    df_i <- bind_cols(df_i %>%  dplyr::select(-c(temp_1:precip_16, logCount_pre)), data.frame(scaledVars))
+    
+    # run models
+    if(modSumm_toRun$n_grid[i] > 1) {
+        f_full <- lmer(form_full, df_i)
+        f_null <- lmer(form_null, df_i)   
+    } else{
+        f_full <- lmer(gsub(":gridID_200k| \\+ gridID_200k", "", form_full), df_i)
+        f_null <- lmer(gsub(":gridID_200k| \\+ gridID_200k", "", form_null), df_i)  
+    }
+    
+    coef_i <- summary(f_full) %>%
+        .$coefficients %>%
+        as.data.frame %>%
+        mutate(term=row.names(.),
+               species = sp_i) %>%
+        as_data_frame
+    # get the KR-approximated degrees of freedom
+    coefs[[i]] <- coef_i
+    modSumm_toRun[i,"sigma_null"] <- sigma(f_null)
+    modSumm_toRun[i,"sigma_full"] <- sigma(f_full)
+    
+    # diagnostic plot
+    png(paste0("../figures/diagnostics/fullVariableSet/", gsub("/", "-", sp_i),".png"), width = 500, height=500)
+    par(mfrow=c(2,2), mai=c(.4, .4, .4,.1))
+    qqnorm(residuals(f_full, scale=T), main="full"); abline(0,1)
+    qqnorm(residuals(f_null, scale=T), main="null"); abline(0,1)
+    plot(residuals(f_full, scale=T)~predict(f_full), col=alpha("black", .5)); abline(0, 0)
+    plot(residuals(f_null, scale=T)~predict(f_null), col=alpha("black", .5)); abline(0, 0)
+    dev.off()
+    # finally, get spatially varying model improvement term
+    df_i$resid_full <- resid(f_full)
+    df_i$resid_null<- resid(f_null)
+    spatial_mse[[i]] <- df_i %>%
+        group_by(gridID_200k) %>%
+        summarise(modImp = mean(resid_full^2)^.5/mean(resid_null^2)^.5, lat=mean(lat_WGS84), lon=mean(lon_WGS84),
+                  species=unique(species))
+}
+```
+
+```{r format&saveOutputs}
+modSumm_toRun <- modSumm_toRun %>%
+    mutate(var_quotient = sigma_full^2/sigma_null^2)
+
+saveRDS(modSumm_toRun, "../files/model outputs/fullModels_explanatoryCapacity.rds")
+
+coefs_full <- bind_rows(coefs) %>%
+    as_data_frame()  %>%
+    mutate(type=ifelse(grepl("precip", term), "precip",
+                             ifelse(grepl("temp", term), "temp", NA))) %>%
+    rename(estimate = Estimate, SE = `Std. Error`, tVal = `t value`, pVal = `Pr(>|t|)`)
+saveRDS(coefs_full, "../files/model outputs/fullModels_coefs.rds")
+
+spatial_full <- bind_rows(spatial_mse) %>%
+    mutate(lon_ID = as.numeric(gsub("lon_([0-9]*).*", "\\1", gridID_200k)),
+           lat_ID = as.numeric(gsub(".*lat_([0-9]*)", "\\1", gridID_200k)))
+saveRDS(spatial_full, "../files/model outputs/fullModels_explanatoryCapacity_spatial.rds")
+```
