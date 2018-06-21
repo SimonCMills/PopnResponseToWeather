@@ -28,8 +28,8 @@ Sections in alignment step:
 ```{r formatECAD}
 # Read in ECAD dataset & join in climate cell info from climateKey
 ECAD <- readRDS("../files/climateDF_monthlySummary.rds")
-# Add 100k and 200k analysis grid cell info to climate key (note: climate cells
-# are at 25km resolution, so this corresponds to 4 and 8 of these respectively)
+# Add 200k analysis grid cell info to climate key (note: climate cells
+# are at 25km resolution, so this corresponds to 8 of these)
 climKey <- readRDS("../files/climateKey_siteID-climateID.rds") %>%
     mutate(gridID_200k = paste0("lon_", ceiling(lon_ID/8), ":lat_", ceiling(lat_ID/8)))
 ECAD_full <- left_join(climKey, ECAD, by=c("climateID"))
@@ -136,7 +136,7 @@ for(i in 1:nrow(modSumm_toRun)) {
         mutate(term=row.names(.),
                species = sp_i) %>%
         as_data_frame
-    # get the KR-approximated degrees of freedom
+    
     coefs[[i]] <- coef_i
     modSumm_toRun[i,"sigma_null"] <- sigma(f_null)
     modSumm_toRun[i,"sigma_full"] <- sigma(f_full)
