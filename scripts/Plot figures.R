@@ -1,16 +1,23 @@
-## Plot figures 
+## Plot figures:
+##  (1) Contribution of weather
+##  (2) Residual variation
+##  (3) P-values
+##  (4) P-values by period
+##  (5) P-values and contribution of weather by species, full var set
+##  (6) P-values and contribution of weather by species, reduced var set
+##  (7) UK only model outputs
 
-## housekeeping ----
+## Housekeeping ----
 library(dplyr);library(egg); library(stringr); library(viridis)
 
-# create df to link numeric months to calendar months
+# create df to link numeric months to calendar months (for plots)
 month_vec <- month.abb[c(5:12, 1:4)]
 varNames <- data_frame(var = c(paste0("precip_", 5:16), paste0("temp_", 5:16)), 
                        var_name = c(paste0("precip_", month_vec), paste0("temp_", month_vec))) %>%
     mutate(var_name = factor(var_name, levels=var_name))
 
 
-## read in model outputs ----
+## Read in model outputs ----
 # model explanatory capacity
 modelPerf_full <- readRDS("files/model outputs/fullModels_explanatoryCapacity.rds") 
 modelPerf_red <- readRDS("files/model outputs/redModels_explanatoryCapacity.rds") 
@@ -43,7 +50,7 @@ coefs <- bind_rows(coefs_full, coefs_red, .id="id") %>%
 
 
 ## Plots ----
-## Model improvement ----
+## (1) Cont. of weather ----
 # get mean
 imp <- modelPerf %>% 
     group_by(id) %>%
@@ -67,7 +74,7 @@ h1 <- modelPerf %>%
     scale_y_continuous(breaks=seq(0, 1, .1))
 ggsave("figures/ModelImprovementPlots.png", plot=h1, width=130, height=150, units="mm")
 
-## Residual variation ----
+## (2) Residual variation ----
 h2 <- modelPerf %>%
     ggplot(aes(sigma_full, y = ..count../tapply(..count..,..PANEL..,sum)[..PANEL..])) + 
     geom_histogram(boundary=0, binwidth=.025, fill="grey55") +
@@ -91,7 +98,7 @@ h2 <- modelPerf %>%
     scale_y_continuous(breaks=seq(0, 1, .05))
 ggsave("figures/residVar.png", plot=h2, width=140, height=150, units="mm")
 
-## Pval hist ----
+## (3) P-values ----
 h3 <- ggplot(coefs, aes(pVal, y = ..count../tapply(..count..,..PANEL..,sum)[..PANEL..])) + 
     geom_histogram(boundary=0, binwidth=.01, colour="black", fill="grey80") +
     facet_wrap(~id, ncol=1) +
@@ -105,10 +112,10 @@ h3 <- ggplot(coefs, aes(pVal, y = ..count../tapply(..count..,..PANEL..,sum)[..PA
 ggsave("figures/pVals.png", plot=h3, width=130, height=150, units="mm")
 
 
-## supp info plots ----
-## Pvals by period ----
+## Supp. info plots ----
+## (4) P-values by period ----
 suppH3 <- coefs %>%
-    mutate(var_name = gsub("_", ": ", var_name)) %>%
+    mutate(var_name = gsub("_", ": ", var_name) %>% factor(., levels=unique(.))) %>%
     filter(., id == "(a) Full variable set") %>%
     ggplot(aes(pVal, y = ..count../tapply(..count..,..PANEL..,sum)[..PANEL..])) + 
     geom_histogram(boundary=0, binwidth=.05, colour="black", fill="grey80") +
@@ -138,7 +145,7 @@ suppH4 <- filter(coefs, id != "(a) Full variable set") %>%
 ggsave("figures/pVals_S1.png", plot=suppH3, width=297, height=190, units="mm")
 ggsave("figures/pVals_S2.png", plot=suppH4, width=297, height=190, units="mm")
 
-## pVals & mPerf by species, full mod ----
+## (5) P-vals & CoW by species, full mod ----
 fullMods_pVals_bySp <- coefs_full %>% group_by(species) %>%
     summarise(propP = sum(pVal< .01)/n()) %>%
     arrange(propP) %>%
@@ -152,7 +159,7 @@ suppPlot_fullMPerf <- ggplot(fullMods_mPerf_bySp, aes(1-var_quotient, species)) 
           axis.text.y  = element_blank(), 
           axis.title.y = element_blank(), 
           axis.ticks.y = element_blank()) +
-    labs(x=bquote("Contribution of weather,  "*sigma[w]^2/sigma[null]^2))
+    labs(x=bquote("Contribution of weather,  "*1-sigma[w]^2/sigma[null]^2))
 
 suppPlot_fullPVal <- ggplot(fullMods_pVals_bySp, aes(propP, species)) + geom_point() +
     theme_bw() +
@@ -165,14 +172,13 @@ suppPlot_fullPVal <- ggplot(fullMods_pVals_bySp, aes(propP, species)) + geom_poi
 suppPlot_full_both <- ggarrange(suppPlot_fullPVal, suppPlot_fullMPerf, ncol=2)
 ggsave("figures/pVal&perf_bySp_S3.png", plot=suppPlot_full_both, height=297, width=190, units="mm") 
 
-## pVals & mPerf by species, red mod ----
+## (6) P-vals & CoW by species, red mod ----
 redMods_pVals_bySp <- coefs_red %>% group_by(species) %>%
     summarise(propP = sum(pVal < .01)/n()) %>%
     arrange(propP) %>%
     mutate(species=factor(species, levels=species))
 redMods_mPerf_bySp <- modelPerf_red %>% 
     mutate(species=factor(species, levels=levels(redMods_pVals_bySp$species)))
-
 
 suppPlot_redMPerf <- ggplot(redMods_mPerf_bySp, aes(1-var_quotient, species)) + geom_point() +
     theme_bw() +
@@ -191,9 +197,9 @@ suppPlot_redPVal <- ggplot(redMods_pVals_bySp, aes(propP, species)) + geom_point
     geom_vline(xintercept=0.01, lty=2)
 
 suppPlot_red_both <- ggarrange(suppPlot_redPVal, suppPlot_redMPerf, ncol=2)
-ggsave("figures/pVal&perf_bySp_redSet_S4.png", plot=suppPlot_full_both, height=297, width=190, units="mm") 
+ggsave("figures/pVal&perf_bySp_redSet_S4.png", plot=suppPlot_red_both, height=297, width=190, units="mm") 
 
-## UK robustness check ----
+## (7) UK robustness check ----
 # read in UK files and merge
 modelPerf_UK_ECAD <- readRDS("files/model outputs/UKModels_ECAD_explanatoryCapacity.rds")
 modelPerf_UK_UKCP <- readRDS("files/model outputs/UKModels_UKCP_explanatoryCapacity.rds")
@@ -228,12 +234,13 @@ imp_UKCP <- modelPerf_UK_UKCP %>%
     summarise(var_quotient=mean(var_quotient), sigma_full = mean(sigma_full))   
 imp2 <-  bind_rows(imp_ECAD, imp_UKCP)
 
+cols_test <- viridis_pal()(10)
 rob1 <- ggplot(modelPerf_UK, aes(1-var_quotient_ECAD, y = ..count../sum(..count..))) +
     geom_histogram(aes(1-var_quotient_UKCP), boundary=0, binwidth=.01, fill=cols_test[1]) +
     geom_histogram(boundary=0, binwidth=.01, alpha=.6, fill=cols_test[7]) +
     theme_bw() +
     geom_vline(xintercept=0, lty=2) +
-    labs(x= bquote("Contribution of weather,  "*sigma[w]^2/sigma[null]^2), y="Relative Frequency")  +
+    labs(x= bquote("Contribution of weather,  "*1-sigma[w]^2/sigma[null]^2), y="Relative Frequency")  +
     scale_fill_manual(values=c("grey80", "black")) +
     theme(panel.grid = element_blank(),
           strip.background = element_rect(fill = "white", colour=NA),
