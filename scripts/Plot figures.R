@@ -73,7 +73,7 @@ h1 <- modelPerf %>%
     scale_x_continuous(breaks=seq(0, 1.05, .05)) +
     scale_y_continuous(breaks=seq(0, 1, .1))
 ggsave("figures/ModelImprovementPlots.png", plot=h1, width=130, height=150, units="mm")
-
+ggsave("figures/pdf/ModelImprovementPlots.pdf", plot=h1, width=130, height=150, units="mm")
 ## (2) Residual variation ----
 h2 <- modelPerf %>%
     ggplot(aes(sigma_full, y = ..count../tapply(..count..,..PANEL..,sum)[..PANEL..])) + 
@@ -96,7 +96,8 @@ h2 <- modelPerf %>%
                                 expression(atop("1.25", "(0.09"*mu*", 11.59"*mu*")"))
                                 )) +
     scale_y_continuous(breaks=seq(0, 1, .05))
-ggsave("figures/residVar.png", plot=h2, width=140, height=150, units="mm")
+ggsave("figures/residVar.png", plot=h2, width=130, height=150, units="mm")
+ggsave("figures/pdf/residVar.pdf", plot=h2, width=130, height=150, units="mm")
 
 ## (3) P-values ----
 h3 <- ggplot(coefs, aes(pVal, y = ..count../tapply(..count..,..PANEL..,sum)[..PANEL..])) + 
@@ -110,7 +111,7 @@ h3 <- ggplot(coefs, aes(pVal, y = ..count../tapply(..count..,..PANEL..,sum)[..PA
           strip.background = element_rect(fill = "white", colour=NA),
           strip.text=element_text(hjust=0, face="bold")) + geom_hline(yintercept=.01, lty=2) 
 ggsave("figures/pVals.png", plot=h3, width=130, height=150, units="mm")
-
+ggsave("figures/pdf/pVals.pdf", plot=h3, width=130, height=150, units="mm")
 
 ## Supp. info plots ----
 ## (4) P-values by period ----
@@ -143,8 +144,9 @@ suppH4 <- filter(coefs, id != "(a) Full variable set") %>%
           strip.text=element_text(hjust=0, face="bold")) + geom_hline(yintercept=.05, lty=2) 
 
 ggsave("figures/pVals_S1.png", plot=suppH3, width=297, height=190, units="mm")
+ggsave("figures/pdf/pVals_S1.pdf", plot=suppH3, width=297, height=190, units="mm")
 ggsave("figures/pVals_S2.png", plot=suppH4, width=297, height=190, units="mm")
-
+ggsave("figures/pdf/pVals_S2.pdf", plot=suppH4, width=297, height=190, units="mm")
 ## (5) P-vals & CoW by species, full mod ----
 fullMods_pVals_bySp <- coefs_full %>% group_by(species) %>%
     summarise(propP = sum(pVal< .01)/n()) %>%
@@ -153,7 +155,8 @@ fullMods_pVals_bySp <- coefs_full %>% group_by(species) %>%
 fullMods_mPerf_bySp <- modelPerf_full %>% 
     mutate(species=factor(species, levels=levels(fullMods_pVals_bySp$species)))
 
-suppPlot_fullMPerf <- ggplot(fullMods_mPerf_bySp, aes(1-var_quotient, species)) + geom_point() +
+suppPlot_fullMPerf <- ggplot(fullMods_mPerf_bySp, aes(1-var_quotient, species)) + 
+    geom_point() +
     theme_bw() +
     theme(panel.grid.minor = element_blank(),
           axis.text.y  = element_blank(), 
@@ -171,6 +174,7 @@ suppPlot_fullPVal <- ggplot(fullMods_pVals_bySp, aes(propP, species)) + geom_poi
 
 suppPlot_full_both <- ggarrange(suppPlot_fullPVal, suppPlot_fullMPerf, ncol=2)
 ggsave("figures/pVal&perf_bySp_S3.png", plot=suppPlot_full_both, height=297, width=190, units="mm") 
+ggsave("figures/pdf/pVal&perf_bySp_S3.pdf", plot=suppPlot_full_both, height=297, width=190, units="mm") 
 
 ## (6) P-vals & CoW by species, red mod ----
 redMods_pVals_bySp <- coefs_red %>% group_by(species) %>%
@@ -198,7 +202,7 @@ suppPlot_redPVal <- ggplot(redMods_pVals_bySp, aes(propP, species)) + geom_point
 
 suppPlot_red_both <- ggarrange(suppPlot_redPVal, suppPlot_redMPerf, ncol=2)
 ggsave("figures/pVal&perf_bySp_redSet_S4.png", plot=suppPlot_red_both, height=297, width=190, units="mm") 
-
+ggsave("figures/pdf/pVal&perf_bySp_redSet_S4.pdf", plot=suppPlot_red_both, height=297, width=190, units="mm") 
 ## (7) UK robustness check ----
 # read in UK files and merge
 modelPerf_UK_ECAD <- readRDS("files/model outputs/UKModels_ECAD_explanatoryCapacity.rds")
@@ -277,3 +281,4 @@ rob3 <- ggplot(coefs_UK, aes(pVal_ECAD, y = ..count../sum(..count..))) +
 
 rob_all <- ggarrange(rob3, rob1, rob2, ncol=1)
 ggsave("figures/UKfigs.png", plot=rob_all, width=130, height=225, units="mm")
+ggsave("figures/pdf/UKfigs.pdf", plot=rob_all, width=130, height=225, units="mm")
